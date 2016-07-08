@@ -29,7 +29,7 @@ func main() {
 			go func(conn net.Conn, cp *CopyPipeline) {
 				defer func() {
 					if w := cp.Writer(); w != nil {
-						w.(net.Conn).Close()
+						w.Close()
 					} else {
 						if len(waitingChan) > 0 {
 							<-waitingChan
@@ -44,7 +44,7 @@ func main() {
 			go func(conn net.Conn, cp *CopyPipeline) {
 				defer func() {
 					if w := cp.Writer(); w != nil {
-						w.(net.Conn).Close()
+						w.Close()
 					}
 					conn.Close()
 				}()
@@ -53,7 +53,7 @@ func main() {
 				w := cp.Reader()
 				cp = &CopyPipeline{}
 				cp.SetReader(conn)
-				cp.SetWriter(w.(io.Writer))
+				cp.SetWriter(w)
 				cp.StartCopy()
 			}(conn, cp)
 		}
@@ -61,31 +61,31 @@ func main() {
 }
 
 type CopyPipeline struct {
-	r io.Reader
-	w io.Writer
+	r io.ReadWriteCloser
+	w io.ReadWriteCloser
 
 	mu sync.RWMutex
 }
 
-func (cp *CopyPipeline) Reader() io.Reader {
+func (cp *CopyPipeline) Reader() io.ReadWriteCloser {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 	return cp.r
 }
 
-func (cp *CopyPipeline) Writer() io.Writer {
+func (cp *CopyPipeline) Writer() io.ReadWriteCloser {
 	cp.mu.RLock()
 	defer cp.mu.RUnlock()
 	return cp.w
 }
 
-func (cp *CopyPipeline) SetReader(r io.Reader) {
+func (cp *CopyPipeline) SetReader(r io.ReadWriteCloser) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.r = r
 }
 
-func (cp *CopyPipeline) SetWriter(w io.Writer) {
+func (cp *CopyPipeline) SetWriter(w io.ReadWriteCloser) {
 	cp.mu.Lock()
 	defer cp.mu.Unlock()
 	cp.w = w
