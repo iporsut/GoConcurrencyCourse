@@ -26,7 +26,7 @@ func main() {
 		select {
 		case waitingChan <- cp:
 			log.Println("New Waiting")
-			go func(conn net.Conn, cp *CopyPipeline) {
+			go func(conn net.Conn, cp *CopyPipeline, waitingChan chan *CopyPipeline) {
 				defer func() {
 					if w := cp.Writer(); w != nil {
 						w.Close()
@@ -39,7 +39,7 @@ func main() {
 				}()
 				cp.SetReader(conn)
 				cp.StartCopy()
-			}(conn, cp)
+			}(conn, cp, waitingChan)
 		case cp := <-waitingChan:
 			go func(conn net.Conn, cp *CopyPipeline) {
 				defer func() {
@@ -56,6 +56,7 @@ func main() {
 				cp.SetWriter(w)
 				cp.StartCopy()
 			}(conn, cp)
+			waitingChan = make(chan *CopyPipeline, 1)
 		}
 	}
 }
