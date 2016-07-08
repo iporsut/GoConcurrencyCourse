@@ -111,7 +111,4 @@ func (cp *CopyPipeline) StartCopy() {
 		}
 	}
 	log.Println("Disconnected")
-	if err := scanner.Err(); err != nil {
-		log.Println(err)
-	}
 }
