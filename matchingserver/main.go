@@ -9,6 +9,39 @@ import (
 	"sync"
 )
 
+func FirstConn(conn io.ReadWriteCloser, mh *MessageHandler, waitingChan chan *MessageHandler) {
+	defer func() {
+		if w := mh.Writer(); w != nil {
+			w.Close()
+		} else {
+			if len(waitingChan) > 0 {
+				<-waitingChan
+			}
+		}
+		conn.Close()
+	}()
+	log.Println("New Waiting")
+	mh.SetReader(conn)
+	mh.StartCopy()
+
+}
+
+func SecondConn(conn io.ReadWriteCloser, mh *MessageHandler) {
+	defer func() {
+		if w := mh.Writer(); w != nil {
+			w.Close()
+		}
+		conn.Close()
+	}()
+	log.Println("Match")
+	mh.SetWriter(conn)
+	w := mh.Reader()
+	mh = &MessageHandler{}
+	mh.SetReader(conn)
+	mh.SetWriter(w)
+	mh.StartCopy()
+}
+
 func main() {
 	l, err := net.Listen("tcp", ":1234")
 	if err != nil {
@@ -25,37 +58,9 @@ func main() {
 		mh := &MessageHandler{}
 		select {
 		case waitingChan <- mh:
-			log.Println("New Waiting")
-			go func(conn net.Conn, mh *MessageHandler, waitingChan chan *MessageHandler) {
-				defer func() {
-					if w := mh.Writer(); w != nil {
-						w.Close()
-					} else {
-						if len(waitingChan) > 0 {
-							<-waitingChan
-						}
-					}
-					conn.Close()
-				}()
-				mh.SetReader(conn)
-				mh.StartCopy()
-			}(conn, mh, waitingChan)
+			go FirstConn(conn, mh, waitingChan)
 		case mh := <-waitingChan:
-			go func(conn net.Conn, mh *MessageHandler) {
-				defer func() {
-					if w := mh.Writer(); w != nil {
-						w.Close()
-					}
-					conn.Close()
-				}()
-				log.Println("Match")
-				mh.SetWriter(conn)
-				w := mh.Reader()
-				mh = &MessageHandler{}
-				mh.SetReader(conn)
-				mh.SetWriter(w)
-				mh.StartCopy()
-			}(conn, mh)
+			go SecondConn(conn, mh)
 			waitingChan = make(chan *MessageHandler, 1)
 		}
 	}
