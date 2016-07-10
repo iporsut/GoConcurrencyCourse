@@ -6,10 +6,62 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"sync"
+
+	"golang.org/x/net/websocket"
 )
 
-func FirstConn(conn io.ReadWriteCloser, mh *MessageHandler, waitingChan chan *MessageHandler) {
+func main() {
+	SocketChat()
+}
+
+func WebSocketChat() {
+	waitingChan := make(chan *MessageHandler, 1)
+	http.Handle("/echo", websocket.Handler(func(ws *websocket.Conn) {
+		Handler(ws, waitingChan)
+	}))
+	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static"))))
+	err := http.ListenAndServe(":1234", nil)
+	if err != nil {
+		panic("ListenAndServe: " + err.Error())
+	}
+}
+
+func SocketChat() {
+	l, err := net.Listen("tcp", ":1234")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer l.Close()
+	waitingChan := make(chan *MessageHandler, 1)
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		go Handler(conn, waitingChan)
+	}
+}
+
+func Handler(conn io.ReadWriteCloser, waitingChan chan *MessageHandler) {
+	mh := &MessageHandler{}
+	select {
+	case waitingChan <- mh:
+		mh.FirstConn(conn, waitingChan)
+	case mh = <-waitingChan:
+		mh.SecondConn(conn)
+	}
+}
+
+type MessageHandler struct {
+	r io.ReadWriteCloser
+	w io.ReadWriteCloser
+
+	mu sync.RWMutex
+}
+
+func (mh *MessageHandler) FirstConn(conn io.ReadWriteCloser, waitingChan chan *MessageHandler) {
 	defer func() {
 		if w := mh.Writer(); w != nil {
 			w.Close()
@@ -22,11 +74,10 @@ func FirstConn(conn io.ReadWriteCloser, mh *MessageHandler, waitingChan chan *Me
 	}()
 	log.Println("New Waiting")
 	mh.SetReader(conn)
-	mh.StartCopy()
-
+	mh.Start()
 }
 
-func SecondConn(conn io.ReadWriteCloser, mh *MessageHandler) {
+func (mh *MessageHandler) SecondConn(conn io.ReadWriteCloser) {
 	defer func() {
 		if w := mh.Writer(); w != nil {
 			w.Close()
@@ -39,38 +90,7 @@ func SecondConn(conn io.ReadWriteCloser, mh *MessageHandler) {
 	mh = &MessageHandler{}
 	mh.SetReader(conn)
 	mh.SetWriter(w)
-	mh.StartCopy()
-}
-
-func main() {
-	l, err := net.Listen("tcp", ":1234")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer l.Close()
-
-	waitingChan := make(chan *MessageHandler, 1)
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			log.Fatal(err)
-		}
-		mh := &MessageHandler{}
-		select {
-		case waitingChan <- mh:
-			go FirstConn(conn, mh, waitingChan)
-		case mh := <-waitingChan:
-			go SecondConn(conn, mh)
-			waitingChan = make(chan *MessageHandler, 1)
-		}
-	}
-}
-
-type MessageHandler struct {
-	r io.ReadWriteCloser
-	w io.ReadWriteCloser
-
-	mu sync.RWMutex
+	mh.Start()
 }
 
 func (mh *MessageHandler) Reader() io.ReadWriteCloser {
@@ -97,7 +117,7 @@ func (mh *MessageHandler) SetWriter(w io.ReadWriteCloser) {
 	mh.w = w
 }
 
-func (mh *MessageHandler) StartCopy() {
+func (mh *MessageHandler) Start() {
 	r := mh.Reader()
 	if r == nil {
 		return
